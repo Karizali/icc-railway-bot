@@ -1,0 +1,747 @@
+//@version=6
+indicator("ICC Clean Structure — HH HL LH LL", overlay=true, max_lines_count=20, max_labels_count=100)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SETTINGS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+swingLen = input.int(3, "Swing Length", minval=2, maxval=10)
+
+rr1 = input.float(1.0, "TP1 (R)", minval=0.5, step=0.5)
+rr2 = input.float(2.0, "TP2 (R)", minval=1.0, step=0.5)
+rr3 = input.float(3.0, "TP3 (R)", minval=1.5, step=0.5)
+rr4 = input.float(4.0, "TP4 (R)", minval=2.0, step=0.5)
+rr5 = input.float(5.0, "TP5 (R)", minval=2.5, step=0.5)
+
+showStructure = input.bool(true, "Show HH / HL / LH / LL")
+showTargets = input.bool(true, "Show TP1–TP5")
+showOnlyActive = input.bool(true, "Keep Only Latest Trade Levels")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIRMED SWINGS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float prevHigh = na
+var float lastHigh = na
+var float prevLow = na
+var float lastLow = na
+
+var int lastHighBar = na
+var int lastLowBar = na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HIGH STRUCTURE
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if not na(ph)
+
+    prevHigh := lastHigh
+    lastHigh := ph
+    lastHighBar := bar_index - swingLen
+
+    if showStructure
+
+        string highText = na(prevHigh) ? "H" : ph > prevHigh ? "HH" : "LH"
+
+        label.new(
+             lastHighBar,
+             ph,
+             highText,
+             style=label.style_label_down,
+             textcolor=color.white,
+             color=ph > prevHigh ? color.green : color.red,
+             size=size.tiny)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LOW STRUCTURE
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if not na(pl)
+
+    prevLow := lastLow
+    lastLow := pl
+    lastLowBar := bar_index - swingLen
+
+    if showStructure
+
+        string lowText = na(prevLow) ? "L" : pl > prevLow ? "HL" : "LL"
+
+        label.new(
+             lastLowBar,
+             pl,
+             lowText,
+             style=label.style_label_up,
+             textcolor=color.white,
+             color=pl > prevLow ? color.green : color.red,
+             size=size.tiny)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ICC STATE
+//
+// 0 = Waiting
+// 1 = Bullish indication
+// 2 = Bullish correction found
+// 3 = Bearish indication
+// 4 = Bearish correction found
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int state = 0
+
+var float indicationHigh = na
+var float indicationLow = na
+
+var float correctionLow = na
+var float correctionHigh = na
+
+var int lastSignalBar = na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INDICATION
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bullBreak =
+     barstate.isconfirmed and
+     not na(lastHigh) and
+     close > lastHigh and
+     close[1] <= lastHigh
+
+bearBreak =
+     barstate.isconfirmed and
+     not na(lastLow) and
+     close < lastLow and
+     close[1] >= lastLow
+
+if bullBreak
+
+    state := 1
+
+    indicationHigh := close
+    indicationLow := na
+
+    correctionLow := na
+    correctionHigh := na
+
+if bearBreak
+
+    state := 3
+
+    indicationLow := close
+    indicationHigh := na
+
+    correctionLow := na
+    correctionHigh := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ICC CORRECTION
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Bullish correction = HL
+if state == 1 and not na(pl)
+
+    if bar_index - swingLen > nz(lastHighBar, -1)
+
+        correctionLow := pl
+
+        state := 2
+
+// Bearish correction = LH
+if state == 3 and not na(ph)
+
+    if bar_index - swingLen > nz(lastLowBar, -1)
+
+        correctionHigh := ph
+
+        state := 4
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ICC CONTINUATION / ENTRY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+buySignal =
+     state == 2 and
+     not na(indicationHigh) and
+     not na(correctionLow) and
+     close > indicationHigh and
+     barstate.isconfirmed
+
+sellSignal =
+     state == 4 and
+     not na(indicationLow) and
+     not na(correctionHigh) and
+     close < indicationLow and
+     barstate.isconfirmed
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TRADE VARIABLES
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float entry = na
+var float sl = na
+
+var float tp1 = na
+var float tp2 = na
+var float tp3 = na
+var float tp4 = na
+var float tp5 = na
+
+var int direction = 0
+var bool tradeActive = false
+var bool tp5Reached = false
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DRAWING OBJECTS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var line entryLine = na
+var line slLine = na
+
+var line tp1Line = na
+var line tp2Line = na
+var line tp3Line = na
+var line tp4Line = na
+var line tp5Line = na
+
+var label entryLabel = na
+var label slLabel = na
+
+var label tp1Label = na
+var label tp2Label = na
+var label tp3Label = na
+var label tp4Label = na
+var label tp5Label = na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DELETE OLD LEVELS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+clearLevels() =>
+
+    if not na(entryLine)
+        line.delete(entryLine)
+
+    if not na(slLine)
+        line.delete(slLine)
+
+    if not na(tp1Line)
+        line.delete(tp1Line)
+
+    if not na(tp2Line)
+        line.delete(tp2Line)
+
+    if not na(tp3Line)
+        line.delete(tp3Line)
+
+    if not na(tp4Line)
+        line.delete(tp4Line)
+
+    if not na(tp5Line)
+        line.delete(tp5Line)
+
+    if not na(entryLabel)
+        label.delete(entryLabel)
+
+    if not na(slLabel)
+        label.delete(slLabel)
+
+    if not na(tp1Label)
+        label.delete(tp1Label)
+
+    if not na(tp2Label)
+        label.delete(tp2Label)
+
+    if not na(tp3Label)
+        label.delete(tp3Label)
+
+    if not na(tp4Label)
+        label.delete(tp4Label)
+
+    if not na(tp5Label)
+        label.delete(tp5Label)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUY
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if buySignal and
+   (na(lastSignalBar) or bar_index != lastSignalBar)
+
+    if showOnlyActive
+        clearLevels()
+
+    entry := close
+
+    // ICC structural stop
+    sl := correctionLow
+
+    float risk = entry - sl
+
+    if risk > syminfo.mintick
+
+        tp1 := entry + risk * rr1
+        tp2 := entry + risk * rr2
+        tp3 := entry + risk * rr3
+        tp4 := entry + risk * rr4
+        tp5 := entry + risk * rr5
+
+        direction := 1
+
+        tradeActive := true
+        tp5Reached := false
+
+        lastSignalBar := bar_index
+
+        // ENTRY
+        entryLine := line.new(
+             bar_index,
+             entry,
+             bar_index + 50,
+             entry,
+             extend=extend.right,
+             color=color.blue,
+             width=2)
+
+        // STOP LOSS
+        slLine := line.new(
+             bar_index,
+             sl,
+             bar_index + 50,
+             sl,
+             extend=extend.right,
+             color=color.red,
+             style=line.style_dashed,
+             width=2)
+
+        // TARGETS
+        if showTargets
+
+            tp1Line := line.new(
+                 bar_index,
+                 tp1,
+                 bar_index + 50,
+                 tp1,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp2Line := line.new(
+                 bar_index,
+                 tp2,
+                 bar_index + 50,
+                 tp2,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp3Line := line.new(
+                 bar_index,
+                 tp3,
+                 bar_index + 50,
+                 tp3,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp4Line := line.new(
+                 bar_index,
+                 tp4,
+                 bar_index + 50,
+                 tp4,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp5Line := line.new(
+                 bar_index,
+                 tp5,
+                 bar_index + 50,
+                 tp5,
+                 extend=extend.right,
+                 color=color.green,
+                 width=2)
+
+        // LABELS
+        entryLabel := label.new(
+             bar_index,
+             entry,
+             "BUY\nENTRY " +
+             str.tostring(entry, format.mintick),
+             style=label.style_label_left,
+             color=color.blue,
+             textcolor=color.white,
+             size=size.small)
+
+        slLabel := label.new(
+             bar_index,
+             sl,
+             "SL " +
+             str.tostring(sl, format.mintick),
+             style=label.style_label_left,
+             color=color.red,
+             textcolor=color.white,
+             size=size.small)
+
+        if showTargets
+
+            tp1Label := label.new(
+                 bar_index,
+                 tp1,
+                 "TP1 " +
+                 str.tostring(tp1, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp2Label := label.new(
+                 bar_index,
+                 tp2,
+                 "TP2 " +
+                 str.tostring(tp2, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp3Label := label.new(
+                 bar_index,
+                 tp3,
+                 "TP3 " +
+                 str.tostring(tp3, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp4Label := label.new(
+                 bar_index,
+                 tp4,
+                 "TP4 " +
+                 str.tostring(tp4, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp5Label := label.new(
+                 bar_index,
+                 tp5,
+                 "TP5 " +
+                 str.tostring(tp5, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.small)
+
+        // Reset ICC setup
+        state := 0
+
+        alert(
+             "ICC BUY | " +
+             syminfo.ticker +
+             " | Entry: " +
+             str.tostring(entry, format.mintick) +
+             " | SL: " +
+             str.tostring(sl, format.mintick) +
+             " | TP1: " +
+             str.tostring(tp1, format.mintick) +
+             " | TP2: " +
+             str.tostring(tp2, format.mintick) +
+             " | TP3: " +
+             str.tostring(tp3, format.mintick) +
+             " | TP4: " +
+             str.tostring(tp4, format.mintick) +
+             " | TP5: " +
+             str.tostring(tp5, format.mintick),
+             alert.freq_once_per_bar_close)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SELL
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if sellSignal and
+   (na(lastSignalBar) or bar_index != lastSignalBar)
+
+    if showOnlyActive
+        clearLevels()
+
+    entry := close
+
+    // ICC structural stop
+    sl := correctionHigh
+
+    float risk = sl - entry
+
+    if risk > syminfo.mintick
+
+        tp1 := entry - risk * rr1
+        tp2 := entry - risk * rr2
+        tp3 := entry - risk * rr3
+        tp4 := entry - risk * rr4
+        tp5 := entry - risk * rr5
+
+        direction := -1
+
+        tradeActive := true
+        tp5Reached := false
+
+        lastSignalBar := bar_index
+
+        // ENTRY
+        entryLine := line.new(
+             bar_index,
+             entry,
+             bar_index + 50,
+             entry,
+             extend=extend.right,
+             color=color.blue,
+             width=2)
+
+        // STOP LOSS
+        slLine := line.new(
+             bar_index,
+             sl,
+             bar_index + 50,
+             sl,
+             extend=extend.right,
+             color=color.red,
+             style=line.style_dashed,
+             width=2)
+
+        // TARGETS
+        if showTargets
+
+            tp1Line := line.new(
+                 bar_index,
+                 tp1,
+                 bar_index + 50,
+                 tp1,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp2Line := line.new(
+                 bar_index,
+                 tp2,
+                 bar_index + 50,
+                 tp2,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp3Line := line.new(
+                 bar_index,
+                 tp3,
+                 bar_index + 50,
+                 tp3,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp4Line := line.new(
+                 bar_index,
+                 tp4,
+                 bar_index + 50,
+                 tp4,
+                 extend=extend.right,
+                 color=color.green)
+
+            tp5Line := line.new(
+                 bar_index,
+                 tp5,
+                 bar_index + 50,
+                 tp5,
+                 extend=extend.right,
+                 color=color.green,
+                 width=2)
+
+        // LABELS
+        entryLabel := label.new(
+             bar_index,
+             entry,
+             "SELL\nENTRY " +
+             str.tostring(entry, format.mintick),
+             style=label.style_label_left,
+             color=color.red,
+             textcolor=color.white,
+             size=size.small)
+
+        slLabel := label.new(
+             bar_index,
+             sl,
+             "SL " +
+             str.tostring(sl, format.mintick),
+             style=label.style_label_left,
+             color=color.red,
+             textcolor=color.white,
+             size=size.small)
+
+        if showTargets
+
+            tp1Label := label.new(
+                 bar_index,
+                 tp1,
+                 "TP1 " +
+                 str.tostring(tp1, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp2Label := label.new(
+                 bar_index,
+                 tp2,
+                 "TP2 " +
+                 str.tostring(tp2, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp3Label := label.new(
+                 bar_index,
+                 tp3,
+                 "TP3 " +
+                 str.tostring(tp3, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp4Label := label.new(
+                 bar_index,
+                 tp4,
+                 "TP4 " +
+                 str.tostring(tp4, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.tiny)
+
+            tp5Label := label.new(
+                 bar_index,
+                 tp5,
+                 "TP5 " +
+                 str.tostring(tp5, format.mintick),
+                 style=label.style_label_left,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.small)
+
+        state := 0
+
+        alert(
+             "ICC SELL | " +
+             syminfo.ticker +
+             " | Entry: " +
+             str.tostring(entry, format.mintick) +
+             " | SL: " +
+             str.tostring(sl, format.mintick) +
+             " | TP1: " +
+             str.tostring(tp1, format.mintick) +
+             " | TP2: " +
+             str.tostring(tp2, format.mintick) +
+             " | TP3: " +
+             str.tostring(tp3, format.mintick) +
+             " | TP4: " +
+             str.tostring(tp4, format.mintick) +
+             " | TP5: " +
+             str.tostring(tp5, format.mintick),
+             alert.freq_once_per_bar_close)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXIT DETECTION
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if tradeActive
+
+    if direction == 1
+
+        if low <= sl
+
+            label.new(
+                 bar_index,
+                 sl,
+                 "EXIT — SL",
+                 style=label.style_label_up,
+                 color=color.red,
+                 textcolor=color.white,
+                 size=size.small)
+
+            tradeActive := false
+
+        else if high >= tp5 and not tp5Reached
+
+            label.new(
+                 bar_index,
+                 tp5,
+                 "EXIT — TP5",
+                 style=label.style_label_down,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.small)
+
+            tp5Reached := true
+            tradeActive := false
+
+    if direction == -1
+
+        if high >= sl
+
+            label.new(
+                 bar_index,
+                 sl,
+                 "EXIT — SL",
+                 style=label.style_label_down,
+                 color=color.red,
+                 textcolor=color.white,
+                 size=size.small)
+
+            tradeActive := false
+
+        else if low <= tp5 and not tp5Reached
+
+            label.new(
+                 bar_index,
+                 tp5,
+                 "EXIT — TP5",
+                 style=label.style_label_up,
+                 color=color.green,
+                 textcolor=color.white,
+                 size=size.small)
+
+            tp5Reached := true
+            tradeActive := false
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUY / SELL SIGNAL
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+plotshape(
+     buySignal,
+     title="ICC BUY",
+     style=shape.triangleup,
+     location=location.belowbar,
+     color=color.green,
+     size=size.small,
+     text="BUY",
+     textcolor=color.white)
+
+plotshape(
+     sellSignal,
+     title="ICC SELL",
+     style=shape.triangledown,
+     location=location.abovebar,
+     color=color.red,
+     size=size.small,
+     text="SELL",
+     textcolor=color.white)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(
+     buySignal,
+     title="ICC BUY Signal",
+     message="ICC BUY signal on {{ticker}} at {{close}}")
+
+alertcondition(
+     sellSignal,
+     title="ICC SELL Signal",
+     message="ICC SELL signal on {{ticker}} at {{close}}")
