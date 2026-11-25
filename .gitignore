@@ -3,3 +3,6 @@ __pycache__/
 .env
 .venv/
 venv/
+# Obsidian: share the vault settings, keep each person's layout and plugins local
+docs/vault/.obsidian/*
+!docs/vault/.obsidian/app.json
