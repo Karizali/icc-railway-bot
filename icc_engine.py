@@ -1,50 +1,54 @@
 import pandas as pd
 
 
-def evaluate_icc_structure(
+def icc_signals(
     df: pd.DataFrame,
     left: int = 3,
     right: int = 3,
     min_tick: float = 0.0,
-) -> dict | None:
+) -> list[dict]:
     """
-    Port of the "ICC Clean Structure" Pine Script (Source Code.txt).
+    Port of the "ICC Clean Structure" Pine Script (Source Code.txt), run over the
+    whole DataFrame the way TradingView runs it over a chart's history.
 
-    Evaluates a DataFrame with ['timestamp', 'high', 'low', 'close'] of closed
-    candles, oldest first, and returns a trade signal dictionary if the latest
-    bar triggers an ICC Continuation entry. With left == right it reproduces
-    the indicator's `swingLen` setting.
+    `df` holds closed candles, oldest first, with ['timestamp', 'high', 'low', 'close'].
+    Returns every alert the indicator would fire (BUY / SELL with Entry, SL, TP1-TP5),
+    each with `bar` (its row in `df`). With left == right this is the indicator's
+    `swingLen`; `min_tick` is `syminfo.mintick`.
     """
-    n = len(df)
-    if n < left + right + 2:
-        return None
-
     highs = df["high"].astype(float).tolist()
     lows = df["low"].astype(float).tolist()
     closes = df["close"].astype(float).tolist()
     timestamps = df["timestamp"].tolist()
+    n = len(closes)
 
+    # ta.pivothigh / ta.pivotlow: the newest bar wins a tie, so the pivot must beat
+    # every bar on its right strictly and match or beat every bar on its left.
     def pivot_high(p: int) -> float | None:
-        window = highs[p - left : p + right + 1]
-        return highs[p] if highs[p] == max(window) and window.count(highs[p]) == 1 else None
+        h = highs[p]
+        if all(x <= h for x in highs[p - left : p]) and all(x < h for x in highs[p + 1 : p + right + 1]):
+            return h
+        return None
 
     def pivot_low(p: int) -> float | None:
-        window = lows[p - left : p + right + 1]
-        return lows[p] if lows[p] == min(window) and window.count(lows[p]) == 1 else None
+        lo = lows[p]
+        if all(x >= lo for x in lows[p - left : p]) and all(x > lo for x in lows[p + 1 : p + right + 1]):
+            return lo
+        return None
 
-    # State: 0 = waiting, 1 = bullish indication, 2 = bullish correction found,
-    #        3 = bearish indication, 4 = bearish correction found
+    # var int state: 0 = waiting, 1 = bullish indication, 2 = bullish correction found,
+    #                3 = bearish indication, 4 = bearish correction found
     state = 0
-    last_high = last_low = None
-    last_high_bar = last_low_bar = -1
+    last_high = last_low = None  # lastHigh / lastLow
+    last_high_bar = last_low_bar = -1  # nz(lastHighBar, -1) / nz(lastLowBar, -1)
     indication_high = indication_low = None
     correction_low = correction_high = None
-    triggered_signal = None
+    signals = []
 
     for t in range(n):
         close = closes[t]
 
-        # 1. Confirmed swings: a pivot at bar p is known `right` bars later (ta.pivothigh / ta.pivotlow)
+        # CONFIRMED SWINGS: a pivot at bar p is reported `right` bars later
         p = t - right
         ph = pivot_high(p) if p - left >= 0 else None
         pl = pivot_low(p) if p - left >= 0 else None
@@ -53,7 +57,7 @@ def evaluate_icc_structure(
         if pl is not None:
             last_low, last_low_bar = pl, p
 
-        # 2. Indication: a close that crosses the last swing high / low
+        # INDICATION: bullBreak / bearBreak (close[1] is na on the first bar)
         if t > 0 and last_high is not None and close > last_high and closes[t - 1] <= last_high:
             state = 1
             indication_high, indication_low = close, None
@@ -63,7 +67,7 @@ def evaluate_icc_structure(
             indication_low, indication_high = close, None
             correction_low = correction_high = None
 
-        # 3. Correction: the first swing low (high) that forms after the broken swing
+        # ICC CORRECTION: bar_index - swingLen > nz(lastHighBar, -1)
         if state == 1 and pl is not None and p > last_high_bar:
             correction_low = pl
             state = 2
@@ -71,27 +75,42 @@ def evaluate_icc_structure(
             correction_high = ph
             state = 4
 
-        # 4. Continuation: a close beyond the indication close
+        # ICC CONTINUATION / ENTRY: buySignal / sellSignal, then `if risk > syminfo.mintick`
+        # (the alert and `state := 0` happen only inside that check)
         if state == 2 and close > indication_high:
             risk = close - correction_low
             if risk > min_tick:
-                if t == n - 1:
-                    triggered_signal = _signal("BUY", timestamps[t], close, correction_low, risk)
+                signals.append(_signal("BUY", t, timestamps[t], close, correction_low, risk))
                 state = 0
         elif state == 4 and close < indication_low:
             risk = correction_high - close
             if risk > min_tick:
-                if t == n - 1:
-                    triggered_signal = _signal("SELL", timestamps[t], close, correction_high, -risk)
+                signals.append(_signal("SELL", t, timestamps[t], close, correction_high, -risk))
                 state = 0
 
-    return triggered_signal
+    return signals
 
 
-def _signal(action: str, timestamp, entry: float, sl: float, risk: float) -> dict:
-    """`risk` is signed: positive for a BUY, negative for a SELL."""
+def evaluate_icc_structure(
+    df: pd.DataFrame,
+    left: int = 3,
+    right: int = 3,
+    min_tick: float = 0.0,
+) -> dict | None:
+    """The alert fired on the last (latest closed) candle of `df`, if any."""
+    if len(df) < left + right + 2:
+        return None
+    signals = icc_signals(df, left, right, min_tick)
+    if signals and signals[-1]["bar"] == len(df) - 1:
+        return signals[-1]
+    return None
+
+
+def _signal(action: str, bar: int, timestamp, entry: float, sl: float, risk: float) -> dict:
+    """`risk` is signed: positive for a BUY, negative for a SELL (tp = entry + risk * rr)."""
     signal = {
         "action": action,
+        "bar": bar,
         "timestamp": pd.Timestamp(timestamp).isoformat(),
         "Entry": round(entry, 6),
         "SL": round(sl, 6),

@@ -34,3 +34,15 @@ Why the switch isn't written down anywhere. The likely reasons are that TradingV
 - `main.py`: crypto position symbols fixed, a crypto stop and target added, restart-proof duplicate guard, real-time IEX data with regular hours only, closed candles only, sizing from the latest price, per-symbol error handling, `/health`, an optional `STATUS_TOKEN`, and a startup key check ([[Known Issues#Fixed on 2026-11-25]]).
 - `.python-version`, `railway.json`, and a complete `.env.example` added for Railway ([[Deployment]]).
 - Every order path was tested with $5 risk on the paper account, then closed out.
+
+## 2026-11-26: backtest
+
+`backtest.py` added (the bar fetch moved into `main.get_bars` so both share it). Over 180 days the strategy lost in every variant tried, mostly from crypto fees ([[Backtest]]).
+
+## 2026-11-26: matched to Source Code.txt, gold only
+
+- Re-audited the engine against `Source Code.txt`. Fixed: the swing tie rule (`ta.pivothigh`: newest equal bar wins) and `syminfo.mintick` (a setup whose risk is one tick or less stays armed). The engine now has `icc_signals()` for a whole history.
+- Checked against a separate literal transliteration of the Pine Script on real GLD and BTC/USD candles: every alert identical. Checked that the 300-candle window equals full history.
+- The exit is now **TP5** by default, the indicator's own exit.
+- The bot trades **GLD only** (Alpaca has no spot gold). A stock or ETF signal on the day's last candle now waits for the next open instead of being dropped, and a failed order is retried.
+- GLD backtest: about break-even over a year ([[Backtest#Gold (GLD), the current setup (run 2026-11-26)]]).

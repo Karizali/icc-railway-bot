@@ -30,5 +30,7 @@ The first list was found by reading the code on 2026-11-25; the fixes landed the
 - [ ] **The crypto stop is a stop-limit** with a 0.5% limit. In a gap through that range it may not fill. Alpaca has no plain stop orders for crypto.
 - [ ] **Memory is ~118 MB**, just over what Railway's Free plan pays for, so it stops for a few days a month on that plan ([[Deployment#Free plan]]). Dropping `alpaca-py` and pandas for plain HTTP calls would roughly halve it.
 - [ ] **Short stock positions** hold a bracket like longs, but borrow fees and hard-to-borrow recalls aren't handled.
-- [ ] **No backtest.** The unit tests check the rules, not whether the strategy makes money.
+- [ ] **On gold the strategy is only about break-even**: +$1,169 in a year on $100 risk a trade, with a $4,359 worst losing run. On crypto it lost heavily, mostly to fees. See [[Backtest]].
+- [ ] **Equal highs and lows** follow PyneCore's tie rule (newest wins), which hasn't been confirmed on TradingView itself. It only matters on exact ties.
+- [ ] **GLD is not XAUUSD.** The bot's signals match the indicator on an `AMEX:GLD` chart (regular hours), not on a spot-gold chart. See [[Pine vs Python Differences#What can still differ: the candles]].
 - [ ] `Source Code.txt` would be easier to find as `icc_indicator.pine`.

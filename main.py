@@ -44,15 +44,16 @@ logger = logging.getLogger("icc-autonomous-bot")
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
-SYMBOLS = [s.strip().upper() for s in os.getenv("SYMBOLS", "BTC/USD,ETH/USD").split(",") if s.strip()]
+SYMBOLS = [s.strip().upper() for s in os.getenv("SYMBOLS", "GLD").split(",") if s.strip()]
 TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "15"))
 PIVOT_LEFT = int(os.getenv("PIVOT_LEFT", "3"))
 PIVOT_RIGHT = int(os.getenv("PIVOT_RIGHT", "3"))
 LOOKBACK_BARS = int(os.getenv("LOOKBACK_BARS", "300"))
 RISK_PER_TRADE_USD = float(os.getenv("RISK_PER_TRADE_USD", "100.0"))
-TARGET_TP_LEVEL = os.getenv("TARGET_TP_LEVEL", "TP2").upper()
+# The indicator ends a trade at its stop or at TP5 ("EXIT — TP5")
+TARGET_TP_LEVEL = os.getenv("TARGET_TP_LEVEL", "TP5").upper()
 if TARGET_TP_LEVEL not in {"TP1", "TP2", "TP3", "TP4", "TP5"}:
-    TARGET_TP_LEVEL = "TP2"
+    TARGET_TP_LEVEL = "TP5"
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 STATUS_TOKEN = os.getenv("STATUS_TOKEN", "")
 
@@ -69,6 +70,8 @@ crypto_data_client = CryptoHistoricalDataClient()  # Crypto data requires no aut
 # Skip re-evaluating a candle that already produced a trade. After a restart this is empty,
 # and the entry order's client_order_id (one per symbol and candle) stops a repeat.
 last_traded_bar: dict[str, str] = {}
+# Stock signals alerted after the close, kept until the market opens (logged once)
+waiting_for_open: dict[str, str] = {}
 bot_status = {"last_scan": None, "signals_triggered": 0, "last_signal": None, "last_error": None}
 scanner_task: asyncio.Task | None = None
 _assets: dict = {}
@@ -99,6 +102,13 @@ def market_is_open() -> bool:
         _clock["is_open"] = trading_client.get_clock().is_open
         _clock["checked"] = time.monotonic()
     return _clock["is_open"]
+
+
+def tick_size(symbol: str) -> float:
+    """syminfo.mintick for the symbol."""
+    if is_crypto(symbol):
+        return get_asset(symbol).price_increment or 0.01
+    return 0.01
 
 
 def round_price(symbol: str, price: float) -> float:
@@ -183,28 +193,18 @@ def order_exists(client_order_id: str) -> bool:
         raise
 
 
-def fetch_bars(symbol: str) -> pd.DataFrame | None:
-    tf = TimeFrame(TIMEFRAME_MINUTES, TimeFrameUnit.Minute)
-    now = datetime.now(timezone.utc)
-
+def get_bars(symbol: str, start: datetime, end: datetime | None = None, timeframe_minutes: int = TIMEFRAME_MINUTES) -> pd.DataFrame:
+    """Closed candles from `start`, oldest first; regular trading hours only for stocks."""
+    tf = TimeFrame(timeframe_minutes, TimeFrameUnit.Minute)
     if is_crypto(symbol):
-        # Bars are only produced for minutes with trades, so ask for a little more than needed
-        start = now - timedelta(minutes=TIMEFRAME_MINUTES * LOOKBACK_BARS * 1.5)
-        req = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start)
+        req = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start, end=end)
         bars = crypto_data_client.get_crypto_bars(req).df
     else:
-        # 6.5 regular-hours trading hours a day, 5 trading days a week, plus holidays
-        days = math.ceil(TIMEFRAME_MINUTES * LOOKBACK_BARS / 390 * 7 / 5) + 4
-        req = StockBarsRequest(
-            symbol_or_symbols=symbol,
-            timeframe=tf,
-            start=now - timedelta(days=days),
-            feed=DataFeed.IEX,
-        )
+        req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start, end=end, feed=DataFeed.IEX)
         bars = stock_data_client.get_stock_bars(req).df
 
     if bars.empty:
-        return None
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
 
     df = bars.reset_index()
     if not is_crypto(symbol):
@@ -213,7 +213,22 @@ def fetch_bars(symbol: str) -> pd.DataFrame | None:
         minutes = local.dt.hour * 60 + local.dt.minute
         df = df[(minutes >= 9 * 60 + 30) & (minutes < 16 * 60)]
     # Keep closed candles only: a bar is closed once its whole timeframe has passed
-    df = df[df["timestamp"] + pd.Timedelta(minutes=TIMEFRAME_MINUTES) <= pd.Timestamp(now)]
+    now = pd.Timestamp(datetime.now(timezone.utc))
+    df = df[df["timestamp"] + pd.Timedelta(minutes=timeframe_minutes) <= now]
+    return df.reset_index(drop=True)
+
+
+def fetch_bars(symbol: str) -> pd.DataFrame | None:
+    now = datetime.now(timezone.utc)
+    if is_crypto(symbol):
+        # Bars are only produced for minutes with trades, so ask for a little more than needed
+        start = now - timedelta(minutes=TIMEFRAME_MINUTES * LOOKBACK_BARS * 1.5)
+    else:
+        # 6.5 regular-hours trading hours a day, 5 trading days a week, plus holidays
+        start = now - timedelta(days=math.ceil(TIMEFRAME_MINUTES * LOOKBACK_BARS / 390 * 7 / 5) + 4)
+    df = get_bars(symbol, start)
+    if df.empty:
+        return None
     return df.tail(LOOKBACK_BARS).reset_index(drop=True)
 
 
@@ -252,7 +267,8 @@ def manage_crypto_exit(symbol: str) -> None:
         logger.info(f"TAKE PROFIT {symbol} at ~{price} (target {target}).")
 
 
-def execute_paper_trade(symbol: str, signal: dict) -> None:
+def execute_paper_trade(symbol: str, signal: dict) -> bool:
+    """Returns False if the signal must wait for the market to open, True once it is dealt with."""
     action = signal["action"]
     sl = signal["SL"]
     tp = signal[TARGET_TP_LEVEL]
@@ -261,7 +277,7 @@ def execute_paper_trade(symbol: str, signal: dict) -> None:
 
     if order_exists(client_order_id):
         logger.info(f"{symbol}: {action} for candle {signal['timestamp']} was already placed, skipping.")
-        return
+        return True
 
     if is_crypto(symbol):
         if action == "SELL":
@@ -271,21 +287,21 @@ def execute_paper_trade(symbol: str, signal: dict) -> None:
                 logger.info(f"Closed long {symbol} on ICC SELL signal.")
             else:
                 logger.info(f"Skipping {symbol} SELL signal (no long position to close).")
-            return
+            return True
     elif not market_is_open():
-        logger.info(f"Skipping {symbol} {action} signal: market is closed.")
-        return
+        # A signal on the day's last candle is alerted after the close: act on it at the next open
+        return False
 
     price = latest_price(symbol)
     long = action == "BUY"
     if (long and not sl < price < tp) or (not long and not tp < price < sl):
         logger.info(f"Skipping {symbol} {action}: price {price} is already outside SL {sl} / {TARGET_TP_LEVEL} {tp}.")
-        return
+        return True
 
     asset = get_asset(symbol)
     if not long and not asset.shortable:
         logger.info(f"Skipping {symbol} SELL: not shortable on Alpaca.")
-        return
+        return True
 
     # Size so that a stop-out loses RISK_PER_TRADE_USD, measured from the price we will actually get
     qty = RISK_PER_TRADE_USD / abs(price - sl)
@@ -300,12 +316,12 @@ def execute_paper_trade(symbol: str, signal: dict) -> None:
         qty = floor_qty(qty, asset.min_trade_increment or 1e-9)
         if qty < (asset.min_order_size or 0) or qty <= 0:
             logger.info(f"Skipping {symbol} BUY: size {qty} is below Alpaca's minimum.")
-            return
+            return True
     else:
         qty = int(qty)
         if qty < 1:
             logger.info(f"Skipping {symbol} {action}: one share would risk more than ${RISK_PER_TRADE_USD}.")
-            return
+            return True
 
     flatten(symbol)
 
@@ -358,23 +374,28 @@ def execute_paper_trade(symbol: str, signal: dict) -> None:
     logger.info(
         f"EXECUTED {action} {qty} {symbol} | ~{price} (signal {signal['Entry']}) | SL={sl} | {TARGET_TP_LEVEL}={tp} | ID={order.id}"
     )
+    return True
 
 
 def scan_symbol(symbol: str) -> None:
     if is_crypto(symbol):
         manage_crypto_exit(symbol)
-    elif not market_is_open():
-        return
 
     df = fetch_bars(symbol)
     if df is None or df.empty:
         return
 
-    signal = evaluate_icc_structure(df, left=PIVOT_LEFT, right=PIVOT_RIGHT)
-    if signal and last_traded_bar.get(symbol) != signal["timestamp"]:
-        last_traded_bar[symbol] = signal["timestamp"]
+    signal = evaluate_icc_structure(df, left=PIVOT_LEFT, right=PIVOT_RIGHT, min_tick=tick_size(symbol))
+    if signal is None or last_traded_bar.get(symbol) == signal["timestamp"]:
+        return
+    if waiting_for_open.get(symbol) != signal["timestamp"]:
         logger.info(f"ICC Signal Detected on {symbol}: {signal}")
-        execute_paper_trade(symbol, signal)
+    if execute_paper_trade(symbol, signal):
+        last_traded_bar[symbol] = signal["timestamp"]
+        waiting_for_open.pop(symbol, None)
+    elif waiting_for_open.get(symbol) != signal["timestamp"]:
+        waiting_for_open[symbol] = signal["timestamp"]
+        logger.info(f"{symbol}: market is closed, the {signal['action']} waits for the next open.")
 
 
 async def market_scanner_loop():

@@ -55,6 +55,20 @@ class IccEngineTest(unittest.TestCase):
         closes = BULL + [15, 14.5, 14, 15.5]
         self.assertIsNone(evaluate_icc_structure(bars(closes), left=2, right=2))
 
+    def test_equal_high_on_the_left_is_still_a_swing(self):
+        # ta.pivothigh: the newest of two equal highs is the pivot (bar 2 here)
+        signal = evaluate_icc_structure(bars([10, 12, 12, 11, 10, 13, 14]), left=2, right=2)
+        self.assertEqual((signal["action"], signal["Entry"], signal["SL"]), ("BUY", 14, 10))
+
+    def test_equal_high_on_the_right_cancels_the_swing(self):
+        self.assertIsNone(evaluate_icc_structure(bars([10, 11, 12, 12, 10, 13, 14]), left=2, right=2))
+
+    def test_risk_must_exceed_min_tick_and_the_setup_stays_armed(self):
+        # Risk 4 is not above a 5 tick: no alert, state stays 2, and the next close (risk 6) fires
+        self.assertIsNone(evaluate_icc_structure(bars(BULL), left=2, right=2, min_tick=5))
+        signal = evaluate_icc_structure(bars(BULL + [16]), left=2, right=2, min_tick=5)
+        self.assertEqual((signal["action"], signal["Entry"], signal["SL"]), ("BUY", 16, 10))
+
     def test_too_few_bars(self):
         self.assertIsNone(evaluate_icc_structure(bars(BULL[:5]), left=2, right=2))
 

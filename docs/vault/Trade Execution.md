@@ -10,7 +10,7 @@ tags: [icc-bot, trading]
 
 1. **Already placed?** The entry's `client_order_id` is `icc-<SYMBOL>-<BUY|SELL>-<candle epoch>`. If Alpaca already has an order with that id, the signal was traded before a restart and is skipped. (Alpaca also refuses a second order with the same id.)
 2. **Crypto SELL**: close the long if there is one, otherwise skip. Spot crypto can't be shorted.
-3. **Stocks**: skip if the market is closed.
+3. **Stocks and ETFs (GLD)**: if the market is closed, **wait for the next open**. The day's last candle closes at 16:00, after the bell, so its signal is placed at about 9:30 the next trading day (logged once as `market is closed, the BUY waits for the next open`). The next checks then use the opening price.
 4. **Price still valid**: the latest trade must still be between SL and the target. If price already ran past either, skip.
 5. **Shortable**: a stock SELL is skipped if Alpaca can't short it.
 
@@ -32,7 +32,9 @@ The latest price is used rather than the signal's `Entry`, so the dollar risk ho
 
 ## Stocks: bracket order
 
-A market order, `GTC`, with `order_class=BRACKET`: take profit is a limit at the target and stop loss is a stop at `SL`, both rounded to cents. Alpaca manages the exit and cancels the other leg.
+A market order, `GTC`, with `order_class=BRACKET`: take profit is a limit at the target (TP5 by default, the indicator's exit) and stop loss is a stop at `SL`, both rounded to cents. Alpaca manages the exit and cancels the other leg. GLD can be shorted, so a SELL opens a short with the same bracket.
+
+If placing an order fails (an Alpaca error), the candle isn't marked as traded, so the next scan tries again while that candle is still the latest. The order-id check stops a double entry.
 
 ## Crypto: stop on Alpaca, target watched by the bot
 
@@ -54,8 +56,9 @@ With $5 risk: a BTC/USD buy, its stop-limit (for the held quantity after fees), 
 ## Log lines
 
 ```
-EXECUTED BUY 0.008345684 BTC/USD | ~59911.2 (signal 59911.2) | SL=59312.088 | TP2=61109.424 | ID=...
+EXECUTED BUY 34 GLD | ~325.6 (signal 325.52) | SL=322.61 | TP5=340.07 | ID=...
 TAKE PROFIT BTC/USD at ~61120.0 (target 61109.424).
 Closed long BTC/USD on ICC SELL signal.
-Skipping AAPL BUY: price 352.1 is already outside SL 345.9 / TP2 366.2.
+Skipping GLD BUY: price 331.2 is already outside SL 322.4 / TP5 330.9.
+GLD: market is closed, the SELL waits for the next open.
 ```

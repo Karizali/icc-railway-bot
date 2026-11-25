@@ -6,7 +6,7 @@ tags: [icc-bot, data]
 
 `fetch_bars(symbol)` in `main.py` returns up to `LOOKBACK_BARS` (300) **closed** candles at `TIMEFRAME_MINUTES`, oldest first, or `None` if Alpaca returns nothing.
 
-A symbol containing `/` is **crypto** (`BTC/USD`); anything else is a **US stock** (`AAPL`).
+A symbol containing `/` is **crypto** (`BTC/USD`); anything else is a **US stock or ETF** (`GLD`, the gold ETF the bot trades).
 
 | | Crypto | Stock |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ A symbol containing `/` is **crypto** (`BTC/USD`); anything else is a **US stock
 | Feed | Alpaca crypto | `DataFeed.IEX` (free, real time) |
 | Window | `TIMEFRAME_MINUTES × 300 × 1.5` minutes back | Enough calendar days for 300 regular-hours bars |
 | Hours | 24/7 | **Regular hours only** (9:30–16:00 New York), like a TradingView stock chart |
-| When fetched | Every scan | Only while the market is open |
+| When fetched | Every scan | Every scan (a signal after the close waits for the open) |
 
 ## Closed candles only
 

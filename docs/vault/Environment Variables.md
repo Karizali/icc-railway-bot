@@ -10,13 +10,13 @@ Read once at import time in `main.py` (from `.env` locally, from the service's V
 | --- | --- | --- |
 | `ALPACA_API_KEY` | `""` | Trading and stock data. **Required**: startup fails without valid keys |
 | `ALPACA_SECRET_KEY` | `""` | Same |
-| `SYMBOLS` | `BTC/USD,ETH/USD` | Comma-separated. A `/` marks crypto, anything else is a US stock ([[Market Data]]) |
+| `SYMBOLS` | `GLD` | Comma-separated. A `/` marks crypto, anything else is a US stock or ETF ([[Market Data]]). **GLD** is gold (Alpaca has no spot XAUUSD) |
 | `TIMEFRAME_MINUTES` | `15` | Candle size, 1 to 59 |
 | `PIVOT_LEFT` | `3` | Bars left of a swing point |
 | `PIVOT_RIGHT` | `3` | Bars right of it, which is also how many bars a swing takes to confirm |
 | `LOOKBACK_BARS` | `300` | Candles fed to the engine each scan |
 | `RISK_PER_TRADE_USD` | `100.0` | Dollars lost if the stop is hit ([[Trade Execution#Position size]]) |
-| `TARGET_TP_LEVEL` | `TP2` | `TP1` to `TP5`; anything else means `TP2` |
+| `TARGET_TP_LEVEL` | `TP5` | `TP1` to `TP5`; anything else means `TP5`. TP5 is the indicator's own exit (`EXIT — TP5`) |
 | `POLL_INTERVAL_SECONDS` | `60` | Pause between scans |
 | `STATUS_TOKEN` | `""` | If set, the [[Status Endpoint]] needs `?token=<value>` |
 
@@ -25,11 +25,14 @@ Read once at import time in `main.py` (from `.env` locally, from the service's V
 
 `WEBHOOK_SECRET` from the webhook version ([[History]]) is no longer used.
 
-## Examples
-
-Stocks and crypto together, 5-minute candles:
+## Gold only (the current setup)
 
 ```env
-SYMBOLS=AAPL,TSLA,BTC/USD
-TIMEFRAME_MINUTES=5
+SYMBOLS=GLD
+TIMEFRAME_MINUTES=15
+PIVOT_LEFT=3
+PIVOT_RIGHT=3
+TARGET_TP_LEVEL=TP5
 ```
+
+Other gold ETFs work the same way: `IAU` or `GLDM` (cheaper per share). `PAXG/USD` is gold as crypto: it trades 24/7 but pays 0.25% a side and can't be shorted.

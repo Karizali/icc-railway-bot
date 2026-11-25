@@ -40,6 +40,8 @@ A new break in either direction replaces the setup in progress.
 | Risk (R) | Entry − SL | SL − Entry |
 | TP1…TP5 | Entry + 1R … 5R | Entry − 1R … 5R |
 
-The bot trades one target, picked by `TARGET_TP_LEVEL` (default **TP2**, 2:1). Size is set so a stop-out loses `RISK_PER_TRADE_USD`. See [[Trade Execution]].
+The indicator ends a trade at the SL or at **TP5** (5:1), or replaces it with the next signal. The bot does the same: its target is `TARGET_TP_LEVEL`, default **TP5**. Size is set so a stop-out loses `RISK_PER_TRADE_USD`. See [[Trade Execution]].
+
+The bot trades it on **GLD**, the gold ETF ([[Environment Variables#Gold only (the current setup)]]).
 
 The exact state machine is in [[Signal Engine]].

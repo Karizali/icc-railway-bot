@@ -8,8 +8,8 @@ An autonomous paper-trading bot. Every minute it pulls closed candles from Alpac
 
 The trading logic is a Python port of a TradingView Pine Script indicator, kept in the repo as `Source Code.txt` ([[Pine Script Reference]]).
 
-> [!info] Where things stand (2026-11-25)
-> The bot runs and is ready for Railway. On 2026-11-25 the engine was rewritten to follow the Pine Script rule for rule, and the execution layer was fixed: crypto positions get a real stop and target, restarts can't repeat a trade, stock data is real time, and every order path was tested on the paper account. 7 engine tests pass. Paper trading only (`paper=True` is hardcoded). What was fixed and what is still open: [[Known Issues]]. How it got here: [[History]].
+> [!info] Where things stand (2026-11-26)
+> The bot trades **gold only, as GLD** (Alpaca has no spot XAUUSD), on an Alpaca **paper** account (`paper=True` is hardcoded). Its signals were checked alert for alert against `Source Code.txt` and match ([[Pine vs Python Differences]]). It exits at SL or TP5, as the indicator does. A one-year backtest on GLD was about break-even: +$1,169 on $100 risk a trade ([[Backtest]]). 15 tests pass. Open items: [[Known Issues]]. How it got here: [[History]].
 
 ## Start here
 
@@ -17,6 +17,7 @@ The trading logic is a Python port of a TradingView Pine Script indicator, kept 
 - [[Environment Variables]]: every setting and its default
 - [[Deployment]]: running it on Railway
 - [[Known Issues]]: bugs, risks, and loose ends found while writing this vault
+- [[Backtest]]: how to run one, and the results (gold: about break-even; crypto: loses money)
 
 ## How it works
 
@@ -41,7 +42,8 @@ The trading logic is a Python port of a TradingView Pine Script indicator, kept 
 | `main.py` | FastAPI app, the scanner loop, data fetching, order placement |
 | `icc_engine.py` | `evaluate_icc_structure()`, the signal logic |
 | `Source Code.txt` | The Pine Script v6 indicator the engine was ported from |
-| `tests/test_icc_engine.py` | Engine unit tests ([[Signal Engine#Tests]]) |
+| `backtest.py` | Replays Alpaca history through the engine ([[Backtest]]) |
+| `tests/` | Engine and backtest unit tests ([[Signal Engine#Tests]], [[Backtest#What it simulates]]) |
 | `requirements.txt` | Pinned dependencies |
 | `.python-version` | `3.13` |
 | `Procfile` | `web: uvicorn main:app --host 0.0.0.0 --port $PORT` |

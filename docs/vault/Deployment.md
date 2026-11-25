@@ -16,7 +16,7 @@ Built for **Railway**. The repo has everything Railway needs:
 ## Steps
 
 1. Push the repo to GitHub, then in Railway: **New Project → Deploy from GitHub repo**.
-2. In the service's **Variables → Raw Editor**, paste the contents of your `.env`. At least `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`; see [[Environment Variables]], and set `PIVOT_LEFT`/`PIVOT_RIGHT` to the chart's swing length.
+2. In the service's **Variables → Raw Editor**, paste the contents of your `.env`. At least `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`, plus `SYMBOLS=GLD`, `TARGET_TP_LEVEL=TP5`, and `PIVOT_LEFT`/`PIVOT_RIGHT` set to the chart's swing length. Variables already set on Railway override the code's defaults, so check them if you deployed before. See [[Environment Variables]].
 3. Optional: **Settings → Networking → Generate Domain** to reach the [[Status Endpoint]]. Set `STATUS_TOKEN` first if you don't want it public.
 4. Deploy. The logs should show `Connected to Alpaca paper account …` then `Starting 24/7 ICC Scanner`.
 5. **Stop any local copy.** Two running bots on one Alpaca account each see the same signals. The order-id guard stops the second one from placing the same entry, but both still manage exits.
